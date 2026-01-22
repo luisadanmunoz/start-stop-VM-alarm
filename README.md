@@ -2,7 +2,7 @@
 
 Solución de automatización en Azure para gestionar el encendido y apagado programado de máquinas virtuales basándose en etiquetas (tags), con notificaciones automáticas por correo electrónico sobre el estado de las operaciones.
 
-## Descripción.
+## Descripción
 
 Este proyecto implementa una infraestructura completa en Azure usando Terraform que permite:
 
