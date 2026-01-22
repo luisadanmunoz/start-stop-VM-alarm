@@ -1,32 +1,41 @@
-# Start/Stop VM Alarm
+---
+title: "Automatización Inteligente de VMs en Azure: Start/Stop con Terraform y Notificaciones"
+date: 2026-01-22
+author: Luis Adán Muñoz
+tags: [Azure, Terraform, Automation, Infrastructure as Code, DevOps, PowerShell]
+categories: [Cloud, Automatización]
+description: "Aprende a implementar una solución completa de automatización para gestionar el encendido y apagado programado de máquinas virtuales en Azure usando Terraform, con notificaciones por email y monitorización integrada."
+---
 
-Solución de automatización en Azure para gestionar el encendido y apagado programado de máquinas virtuales basándose en etiquetas (tags), con notificaciones automáticas por correo electrónico sobre el estado de las operaciones.
+# Automatización Inteligente de VMs en Azure: Start/Stop con Terraform y Notificaciones
 
-## Descripción
+¿Te has preguntado cuánto dinero estás desperdiciando por dejar VMs de desarrollo o testing encendidas durante las noches y fines de semana? En este artículo te mostraré cómo implementé una solución completa de automatización en Azure que no solo gestiona el ciclo de vida de tus VMs, sino que también te mantiene informado de cada operación mediante notificaciones inteligentes.
 
-Este proyecto implementa una infraestructura completa en Azure usando Terraform que permite:
+## El Problema: VMs Olvidadas = Dinero Desperdiciado
 
-- **Automatizar el encendido/apagado** de VMs según horarios definidos
-- **Filtrar VMs por tags** (por ejemplo, `environment=pre`)
-- **Enviar notificaciones por correo** con el resultado de cada operación
-- **Monitorizar** la ejecución de los runbooks mediante Log Analytics y alertas programadas
-- **Desplegar con red privada** usando Private Endpoints para mayor seguridad
+En entornos de desarrollo y preproducción, es común que los equipos dejen las máquinas virtuales encendidas 24/7 "por si acaso". Sin embargo, esto genera costos innecesarios:
 
-## Arquitectura
+- Una VM B2s en Azure cuesta aproximadamente **€30/mes** si se ejecuta continuamente
+- Si solo necesitas esa VM 8 horas al día (de lunes a viernes), podrías estar pagando **3x más** de lo necesario
+- Multiplica esto por 10, 20 o 50 VMs en tu organización... ¡los números se disparan!
 
-La solución despliega los siguientes componentes de Azure:
+**La solución**: Automatizar el encendido y apagado de VMs basándose en horarios y etiquetas.
 
-- **Automation Account** con identidad administrada (System Assigned)
-- **Automation Runbooks** PowerShell para start/stop de VMs
-- **Automation Schedules** para ejecutar runbooks de forma programada
-- **Action Group** para notificaciones por correo electrónico
-- **Log Analytics Workspace** para centralizar logs
-- **Monitor Scheduled Query Rules Alert V2** para detectar finalización de jobs
-- **Virtual Network** y **Subnet** para conectividad privada
-- **Private DNS Zone** para resolución DNS privada del Automation Account
-- **Role Assignments** necesarios para permisos de la identidad administrada
+## La Solución: Infraestructura como Código con Terraform
 
-### Diagrama de Arquitectura
+He desarrollado una solución completa usando Terraform que implementa:
+
+✅ **Azure Automation Account** con identidad administrada  
+✅ **Runbooks PowerShell** para iniciar/detener VMs  
+✅ **Schedules automatizados** para ejecución programada  
+✅ **Filtrado por tags** para gestión granular  
+✅ **Notificaciones por email** con resumen de operaciones  
+✅ **Monitorización** con Log Analytics y alertas  
+✅ **Conectividad privada** mediante Private Endpoints  
+
+## Arquitectura de la Solución
+
+La arquitectura se compone de varios componentes de Azure trabajando en conjunto:
 
 ```mermaid
 graph TB
@@ -58,13 +67,6 @@ graph TB
         VM3[VM 3<br/>tag: environment=pre]
     end
 
-    subgraph "Permisos RBAC"
-        RBAC1[Virtual Machine Contributor<br/>sobre RG de VMs]
-        RBAC2[Monitoring Contributor<br/>sobre RG Automation]
-        RBAC3[Contributor<br/>sobre Action Group]
-        RBAC4[Log Analytics Reader<br/>sobre LAW]
-    end
-
     VNET --> SUBNET
     SUBNET --> PE
     PE --> AA
@@ -76,10 +78,6 @@ graph TB
     AA --> RB_START
     AA --> RB_STOP
     AA --> VAR
-    
-    RB_START -->|Get-AzVM -Status| VM1
-    RB_START -->|Get-AzVM -Status| VM2
-    RB_START -->|Get-AzVM -Status| VM3
     
     RB_START -->|Start-AzVM| VM1
     RB_START -->|Start-AzVM| VM2
@@ -103,18 +101,6 @@ graph TB
     
     LAW --> ALERT
     ALERT -->|Trigger on Job Finish| AG
-    
-    AA -.Identity.-> RBAC1
-    AA -.Identity.-> RBAC2
-    AA -.Identity.-> RBAC3
-    AA -.Identity.-> RBAC4
-    
-    RBAC1 -.Allows.-> VM1
-    RBAC1 -.Allows.-> VM2
-    RBAC1 -.Allows.-> VM3
-    RBAC2 -.Allows.-> LAW
-    RBAC3 -.Allows.-> AG
-    RBAC4 -.Allows.-> LAW
 
     style AA fill:#0078D4,stroke:#005A9E,color:#fff
     style RB_START fill:#50E6FF,stroke:#0078D4,color:#000
@@ -127,41 +113,50 @@ graph TB
     style EMAIL fill:#FFB6C1,stroke:#FF69B4,color:#000
 ```
 
-### Diagrama de Flujo de Ejecución
+### Componentes Principales
+
+#### 1. **Automation Account**
+El cerebro de la operación. Configurado con:
+- **Identidad Administrada (System Assigned)**: No requiere credenciales explícitas
+- **Conectividad Privada**: Mediante Private Endpoint para mayor seguridad
+- **SKU Basic**: Suficiente para la mayoría de casos de uso
+
+#### 2. **Runbooks PowerShell**
+Scripts que ejecutan la lógica de negocio:
+- `vm-start.ps1`: Enciende VMs filtradas por tags
+- `vm-stop.ps1`: Apaga VMs filtradas por tags
+
+Cada runbook sigue este flujo:
 
 ```mermaid
 sequenceDiagram
-    participant SCH as Automation Schedule<br/>(08:00 AM)
-    participant RB as Runbook<br/>(vm-start.ps1)
-    participant AAI as Automation Account<br/>Identity
-    participant AZURE as Azure Resource Manager
-    participant VM as Virtual Machines<br/>(tag: environment=pre)
+    participant SCH as Automation Schedule
+    participant RB as Runbook
+    participant AAI as Managed Identity
+    participant AZURE as Azure ARM
+    participant VM as Virtual Machines
     participant AG as Action Group
-    participant EMAIL as Email Recipients
+    participant EMAIL as Email
 
-    Note over SCH,RB: Trigger diario programado
-    SCH->>RB: Ejecutar runbook
-    
+    SCH->>RB: Trigger (08:00 AM)
     activate RB
     RB->>AAI: Connect-AzAccount -Identity
     AAI-->>RB: Token de autenticación
     
     RB->>AZURE: Get-AzVM -Status
-    AZURE-->>RB: Lista de todas las VMs
+    AZURE-->>RB: Lista de VMs
     
-    Note over RB: Filtrar VMs con tag<br/>environment=pre
+    Note over RB: Filtrar VMs con<br/>tag: environment=pre
     
-    RB->>RB: Procesar lista de VMs objetivo
-    
-    loop Para cada VM con el tag
+    loop Para cada VM objetivo
         RB->>VM: Verificar PowerState
-        VM-->>RB: Estado actual (running/stopped/deallocated)
+        VM-->>RB: Estado actual
         
         alt VM no está running
             RB->>VM: Start-AzVM
             VM-->>RB: Operación iniciada
         else VM ya está running
-            RB->>RB: Skip (ya está encendida)
+            RB->>RB: Skip
         end
     end
     
@@ -171,534 +166,647 @@ sequenceDiagram
     RB->>AZURE: Get-AzVM -Status (verificación)
     AZURE-->>RB: Estados actualizados
     
-    RB->>RB: Construir resumen:<br/>- VMs running<br/>- VMs no running<br/>- Errores
+    RB->>RB: Construir resumen
     
-    RB->>AAI: Get-AutomationVariable<br/>"ACTION_GROUP_ID"
-    AAI-->>RB: Action Group ID
-    
-    RB->>AAI: Get-AzAccessToken
-    AAI-->>RB: Access Token
-    
-    RB->>AG: POST /createNotifications<br/>Resumen de ejecución
-    AG->>EMAIL: Enviar notificación por correo
-    
-    EMAIL-->>AG: Email entregado
-    AG-->>RB: Notificación enviada
+    RB->>AG: POST /createNotifications
+    AG->>EMAIL: Enviar email con resumen
     
     deactivate RB
     
-    Note over EMAIL: 📧 Correo recibido con:<br/>- VMs encendidas<br/>- VMs que no se encendieron<br/>- Errores (si los hay)
+    Note over EMAIL: 📧 Resumen recibido:<br/>VMs running/stopped<br/>Errores si los hay
 ```
 
-### Diagrama de Estados de VM
+#### 3. **Schedules Automatizados**
+Programaciones que disparan los runbooks:
+- **Inicio**: Lunes a Viernes, 08:00 AM
+- **Parada**: Lunes a Viernes, 05:00 PM
+- **Zona horaria**: Europe/Madrid (configurable)
 
-```mermaid
-stateDiagram-v2
-    [*] --> Verificando
-    
-    state "Schedule Trigger (08:00 AM)" as Verificando
-    state "VM Running" as Running
-    state "VM Stopped" as Stopped  
-    state "VM Deallocated" as Deallocated
-    state "Skip VM" as SkipVM
-    state "Iniciando VM" as Iniciando
-    state "Esperando 60s" as Esperando
-    state "Verificar Estado" as VerificarEstado
-    state "Error al Iniciar" as Error
-    state "Notificar Resultados" as Notificar
-    state "Enviar Email" as EnviarEmail
-    
-    Verificando --> Running: VM ya encendida
-    Verificando --> Stopped: VM detenida
-    Verificando --> Deallocated: VM deallocated
-    
-    Running --> SkipVM: No requiere acción
-    
-    Stopped --> Iniciando: Start-AzVM ejecutado
-    Deallocated --> Iniciando: Start-AzVM ejecutado
-    
-    Iniciando --> Esperando: Esperar confirmación
-    
-    Esperando --> VerificarEstado: Re-verificar estado
-    
-    VerificarEstado --> Running: VM encendida exitosamente
-    VerificarEstado --> Error: VM no pudo encenderse
-    
-    Running --> Notificar: Agregar a lista Running
-    Error --> Notificar: Agregar a lista Errores
-    SkipVM --> Notificar: Agregar a lista Running
-    
-    Notificar --> EnviarEmail: Action Group envía resumen
-    
-    EnviarEmail --> [*]: Proceso completado
-    
-    note right of Verificando
-        Filtrar VMs con
-        tag environment=pre
-    end note
-    
-    note right of Iniciando
-        Operación asíncrona
-        Azure inicia el proceso
-    end note
-    
-    note right of EnviarEmail
-        Email incluye:
-        VMs running
-        VMs no running
-        Detalles de errores
-    end note
-```
+#### 4. **Action Groups y Notificaciones**
+Sistema de notificaciones que envía emails con:
+- Lista de VMs que se iniciaron correctamente
+- Lista de VMs que no pudieron iniciarse
+- Detalles de errores encontrados
+- Estado final de cada VM
 
-## Requisitos Previos
+## Implementación Paso a Paso
 
-- **Terraform** >= 1.0
-- **Azure CLI** configurado con permisos adecuados
-- **Proveedor azurerm** 4.57.0
-- Una **suscripción de Azure** activa
-- Permisos para crear recursos en la suscripción
+### Paso 1: Preparar el Entorno
 
-## Variables Principales
+Clona el repositorio:
 
-### Resource Group
-```hcl
-rg = {
-  rg1 = {
-    resource_group_name = "rg-lab-01"
-    location            = "spaincentral"
-  }
-}
-```
-
-### Automation Account
-```hcl
-automation_accounts = {
-  aa-prod = {
-    automation_account_name       = "aa-prod"
-    resource_group_name           = "rg-lab-01"
-    location                      = "spaincentral"
-    sku_name                      = "Basic"
-    identity_type                 = "SystemAssigned"
-    public_network_access_enabled = false
-    private_dns_zone_ids          = "privatelink.azure-automation.net"
-    subnet                        = "subnet-lab-01"
-  }
-}
-```
-
-### Automation Runbooks
-```hcl
-automation_runbooks = {
-  rb_vm_start = {
-    resource_group_name     = "rg-lab-01"
-    location                = "spaincentral"
-    automation_account_name = "aa-prod"
-    runbook_type            = "PowerShell"
-    script_path             = "runbooks/vm-start.ps1"
-    description             = "Arranque de VMs"
-  }
-  rb_vm_stop = {
-    resource_group_name     = "rg-lab-01"
-    location                = "spaincentral"
-    automation_account_name = "aa-prod"
-    runbook_type            = "PowerShell"
-    script_path             = "runbooks/vm-stop.ps1"
-    description             = "Parada de VMs"
-  }
-}
-```
-
-### Automation Schedules
-```hcl
-automation_schedule = {
-  sch_vm_start_pre_0800 = {
-    name                    = "sch-vm-start-daily-0800"
-    resource_group_name     = "rg-lab-01"
-    automation_account_name = "aa-prod"
-    frequency               = "Day"
-    interval                = 1
-    vm_start_schedule_start_time  = "2026-01-15T08:00:00+01:00"
-    vm_start_schedule_timezone    = "Europe/Madrid"
-    runbook_name            = "rb_vm_start"
-    tag_key                 = "environment"
-    tag_value               = "pre"
-  }
-}
-```
-
-### Role Assignments
-```hcl
-role_assignments = {
-  ra1 = {
-    scope                   = "/subscriptions/{sub-id}/resourceGroups/rg-vms"
-    role_definition_name    = "Virtual Machine Contributor"
-    automation_account_name = "aa-prod"
-  }
-  ra2 = {
-    scope                   = "/subscriptions/{sub-id}/resourceGroups/rg-lab-01"
-    role_definition_name    = "Monitoring Contributor"
-    automation_account_name = "aa-prod"
-  }
-  ra3 = {
-    scope                   = "/subscriptions/{sub-id}/resourceGroups/rg-lab-01/providers/Microsoft.Insights/actionGroups/ag-vm-tag-email-lab-01"
-    role_definition_name    = "Contributor"
-    automation_account_name = "aa-prod"
-  }
-  ra_law_reader = {
-    scope                   = "/subscriptions/{sub-id}/resourceGroups/rg-lab-01/providers/Microsoft.OperationalInsights/workspaces/law-lab-01"
-    role_definition_name    = "Log Analytics Reader"
-    automation_account_name = "aa-prod"
-  }
-}
-```
-
-### Monitor Action Group
-```hcl
-monitor_action_group = {
-  ag_lab_email = {
-    name                            = "ag-vm-tag-email-lab-01"
-    resource_group_name             = "rg-lab-01"
-    short_name                      = "aglabemail"
-    email_receiver_name             = "ops"
-    email_receiver_email_address    = "usuario@dominio.com"
-    automation_account_name         = "aa-prod"
-  }
-}
-```
-
-### Log Analytics
-```hcl
-log_analytics = {
-  log1 = {
-    name                    = "law-lab-01"
-    location                = "spaincentral"
-    resource_group_name     = "rg-lab-01"
-    sku                     = "PerGB2018"
-    retention_in_days       = "30"
-    automation_account_name = "aa-prod"
-  }
-}
-```
-
-### Monitor Scheduled Query Rules Alert
-```hcl
-monitor_scheduled_query_rules_alert_v2 = {
-  alert_automation_job_finished = {
-    name                                        = "automation-runbook-finished"
-    resource_group_name                         = "rg-lab-01"
-    location                                    = "spaincentral"
-    law_id                                      = "law-lab-01"
-    severity                                    = 4
-    evaluation_frequency                        = "PT5M"
-    window_duration                             = "PT5M"
-    time_aggregation_method                     = "Count"
-    operator                                    = "GreaterThan"
-    threshold                                   = 0
-    minimum_failing_periods_to_trigger_alert    = 1
-    number_of_evaluation_periods                = 1
-    action_group_id                             = "ag_lab_email"
-  }
-}
-```
-
-## Instalación y Uso
-
-### 1. Clonar el repositorio
 ```bash
 git clone https://github.com/luisadanmunoz/start-stop-VM-alarm.git
 cd start-stop-VM-alarm
 ```
 
-### 2. Configurar variables
-Copia el archivo de ejemplo y ajusta los valores según tu entorno:
+### Paso 2: Configurar Variables
 
-```bash
-cp start-stop-VM-alarm.tfvars.example terraform.tfvars
-```
-
-Edita `terraform.tfvars` y configura:
-- IDs de recursos (scopes) para role assignments
-- Direcciones de correo electrónico para notificaciones
-- Horarios de inicio/parada (en formato ISO8601)
-- Tags para filtrar las VMs
-
-### 3. Configurar backend (opcional)
-Si usas un backend remoto en Azure Storage, configura el archivo `backend.conf`:
+Crea tu archivo `terraform.tfvars` basándote en el ejemplo:
 
 ```hcl
-resource_group_name  = "rg-terraform-state"
-storage_account_name = "sttfstate"
-container_name       = "tfstate"
-key                  = "start-stop-vm.tfstate"
-```
+# Tags para identificar recursos
+tags = {
+  environment = "lab"
+  project     = "vm-automation"
+}
 
-### 4. Inicializar Terraform
-```bash
-terraform init -backend-config=backend.conf
-```
+# Resource Group
+rg = {
+  rg1 = {
+    resource_group_name = "rg-automation-lab"
+    location            = "spaincentral"
+  }
+}
 
-### 5. Validar configuración
-```bash
-terraform validate
-terraform plan
-```
+# Automation Account
+automation_accounts = {
+  aa-prod = {
+    automation_account_name       = "aa-vm-automation"
+    resource_group_name           = "rg-automation-lab"
+    location                      = "spaincentral"
+    sku_name                      = "Basic"
+    identity_type                 = "SystemAssigned"
+    public_network_access_enabled = false
+    private_dns_zone_ids          = "privatelink.azure-automation.net"
+    subnet                        = "subnet-automation"
+  }
+}
 
-### 6. Desplegar infraestructura
-```bash
-terraform apply
-```
+# Runbooks
+automation_runbooks = {
+  rb_vm_start = {
+    resource_group_name     = "rg-automation-lab"
+    location                = "spaincentral"
+    automation_account_name = "aa-vm-automation"
+    runbook_type            = "PowerShell"
+    script_path             = "runbooks/vm-start.ps1"
+    description             = "Arranque automático de VMs"
+  }
+  rb_vm_stop = {
+    resource_group_name     = "rg-automation-lab"
+    location                = "spaincentral"
+    automation_account_name = "aa-vm-automation"
+    runbook_type            = "PowerShell"
+    script_path             = "runbooks/vm-stop.ps1"
+    description             = "Parada automática de VMs"
+  }
+}
 
-### 7. Configurar variable en Automation Account
-Después del despliegue, configura manualmente la variable `ACTION_GROUP_ID` en el Automation Account:
-
-1. Ve al Automation Account en el portal de Azure
-2. Navega a **Variables** en el menú lateral
-3. Crea una nueva variable:
-   - **Nombre**: `ACTION_GROUP_ID`
-   - **Valor**: `/subscriptions/{sub-id}/resourceGroups/{rg-name}/providers/Microsoft.Insights/actionGroups/{ag-name}`
-   - **Tipo**: String
-   - **Encriptada**: No
-
-## Estructura de Archivos
-
-```
-.
-├── automation_account.tf                     # Automation Account principal
-├── automation_runbook.tf                     # Runbooks PowerShell
-├── automation_schedule.tf                    # Programación de runbooks
-├── log_analytics.tf                          # Log Analytics Workspace
-├── monitor_action_group.tf                   # Action Group para emails
-├── monitor_scheduled_query_rules_alert_v2.tf # Alertas de monitorización
-├── private_dns_zone.tf                       # DNS privado
-├── provider.tf                               # Providers y backend
-├── rg.tf                                     # Resource Groups
-├── role_assignment.tf                        # Asignaciones de roles
-├── subnet.tf                                 # Subnets
-├── variables.tf                              # Definición de variables
-├── vnet.tf                                   # Virtual Networks
-├── start-stop-VM-alarm.tfvars                # Valores de variables
-├── runbooks/
-│   ├── vm-start.ps1                          # Script PowerShell para iniciar VMs
-│   └── vm-stop.ps1                           # Script PowerShell para detener VMs
-└── README.md                                 # Este archivo
-```
-
-## Funcionamiento de los Runbooks
-
-### vm-start.ps1
-Runbook PowerShell que realiza las siguientes acciones:
-
-1. Se conecta a Azure usando la identidad administrada del Automation Account
-2. Busca todas las VMs que tengan un tag específico (por ejemplo, `environment=pre`)
-3. Verifica el estado actual de cada VM
-4. Intenta iniciar las VMs que estén detenidas
-5. Espera 60 segundos para permitir que las VMs se inicien
-6. Vuelve a verificar el estado de todas las VMs
-7. Envía un correo electrónico mediante el Action Group con un resumen detallado:
-   - VMs que quedaron en estado "Running"
-   - VMs que no lograron iniciarse (con su estado actual)
-   - Errores encontrados durante el proceso
-
-**Parámetros del runbook:**
-- `tagkey`: Clave del tag para filtrar VMs (default: "environment")
-- `tagvalue`: Valor del tag para filtrar VMs (default: "pre")
-- `subscriptionid`: ID de suscripción (opcional, usa la del contexto si no se especifica)
-- `waitseconds`: Segundos a esperar antes del re-chequeo (default: 60)
-
-### vm-stop.ps1
-Runbook similar a vm-start.ps1 pero para detener VMs. Sigue el mismo flujo de trabajo pero ejecuta `Stop-AzVM` en lugar de `Start-AzVM`.
-
-### Ejemplo de correo de notificación
-```
-Asunto: Resultado start VMs por tag (environment=pre)
-
-Resumen:
-- Running: vm-web-01, vm-app-01, vm-db-01
-- No running: vm-test-01 [VM deallocated]
-- Errores al solicitar start: (ninguno)
-```
-
-## Permisos Necesarios
-
-La identidad administrada del Automation Account requiere los siguientes roles:
-
-| Rol | Ámbito | Propósito |
-|-----|--------|-----------|
-| Virtual Machine Contributor | Resource Group de las VMs | Iniciar/detener VMs |
-| Monitoring Contributor | Resource Group del Automation Account | Escribir logs y métricas |
-| Contributor | Action Group específico | Enviar notificaciones |
-| Log Analytics Reader | Log Analytics Workspace | Leer logs para alertas |
-
-## Características de Seguridad
-
-- **Red privada**: El Automation Account está configurado con `public_network_access_enabled = false`
-- **Private Endpoint**: Acceso al Automation Account mediante Private Endpoint
-- **Private DNS Zone**: Resolución DNS privada para `privatelink.azure-automation.net`
-- **Identidad administrada**: Usa System Assigned Managed Identity sin necesidad de credenciales
-- **Principio de mínimo privilegio**: Los role assignments están limitados a los ámbitos necesarios
-
-## Monitorización y Alertas
-
-### Log Analytics
-Todos los logs de ejecución de los runbooks se envían automáticamente al Log Analytics Workspace configurado.
-
-### Alertas Programadas
-Se configura una alerta que se ejecuta cada 5 minutos para detectar cuando un runbook finaliza su ejecución. Esto permite:
-
-- Detectar fallos en la ejecución
-- Monitorizar tiempos de ejecución
-- Tener visibilidad del estado general del sistema
-
-### Notificaciones por Email
-Cada ejecución de runbook envía un correo electrónico con:
-
-- Estado final de cada VM objetivo
-- Lista de VMs que se iniciaron/detuvieron correctamente
-- Lista de VMs que no cambiaron de estado
-- Detalles de errores si los hubiera
-
-## Ejemplo de Uso
-
-### Configurar inicio automático diario
-Para configurar que las VMs con tag `environment=pre` se inicien todos los días a las 8:00 AM:
-
-```hcl
+# Schedules
 automation_schedule = {
   sch_vm_start_pre_0800 = {
     name                              = "sch-vm-start-daily-0800"
-    resource_group_name               = "rg-lab-01"
-    automation_account_name           = "aa-prod"
+    resource_group_name               = "rg-automation-lab"
+    automation_account_name           = "aa-vm-automation"
     frequency                         = "Day"
     interval                          = 1
-    vm_start_schedule_start_time      = "2026-01-15T08:00:00+01:00"
-    vm_start_schedule_description     = "Arranca VMs con tag environment=pre"
+    vm_start_schedule_start_time      = "2026-01-23T08:00:00+01:00"
+    vm_start_schedule_description     = "Arranque automático VMs pre"
     vm_start_schedule_timezone        = "Europe/Madrid"
     runbook_name                      = "rb_vm_start"
     tag_key                           = "environment"
     tag_value                         = "pre"
   }
-}
-```
-
-### Configurar parada automática diaria
-Para configurar que las mismas VMs se detengan todos los días a las 17:00 PM:
-
-```hcl
-automation_schedule = {
   sch_vm_stop_pre_1700 = {
     name                              = "sch-vm-stop-daily-1700"
-    resource_group_name               = "rg-lab-01"
-    automation_account_name           = "aa-prod"
+    resource_group_name               = "rg-automation-lab"
+    automation_account_name           = "aa-vm-automation"
     frequency                         = "Day"
     interval                          = 1
-    vm_start_schedule_start_time      = "2026-01-15T17:00:00+01:00"
-    vm_start_schedule_description     = "Para VMs con tag environment=pre"
+    vm_start_schedule_start_time      = "2026-01-23T17:00:00+01:00"
+    vm_start_schedule_description     = "Parada automática VMs pre"
     vm_start_schedule_timezone        = "Europe/Madrid"
     runbook_name                      = "rb_vm_stop"
     tag_key                           = "environment"
     tag_value                         = "pre"
   }
 }
+
+# Action Group para notificaciones
+monitor_action_group = {
+  ag_lab_email = {
+    name                            = "ag-vm-automation-email"
+    resource_group_name             = "rg-automation-lab"
+    short_name                      = "vmautoemail"
+    email_receiver_name             = "ops-team"
+    email_receiver_email_address    = "tu-email@dominio.com"
+    automation_account_name         = "aa-vm-automation"
+  }
+}
 ```
 
-### Etiquetar VMs para automatización
-Para que una VM sea gestionada por esta solución, simplemente añádele el tag correspondiente:
+### Paso 3: Configurar Role Assignments
 
-```bash
-az vm update \
-  --resource-group rg-vms-prod \
-  --name vm-web-01 \
-  --set tags.environment=pre
-```
-
-O mediante Terraform:
+**Importante**: Los permisos deben configurarse con los IDs reales de tus recursos:
 
 ```hcl
-resource "azurerm_virtual_machine" "example" {
-  name                = "vm-web-01"
+role_assignments = {
+  # Permiso para gestionar VMs
+  ra_vm_contributor = {
+    scope                   = "/subscriptions/{sub-id}/resourceGroups/{rg-vms}"
+    role_definition_name    = "Virtual Machine Contributor"
+    automation_account_name = "aa-vm-automation"
+  }
+  
+  # Permiso para monitorización
+  ra_monitoring = {
+    scope                   = "/subscriptions/{sub-id}/resourceGroups/rg-automation-lab"
+    role_definition_name    = "Monitoring Contributor"
+    automation_account_name = "aa-vm-automation"
+  }
+  
+  # Permiso sobre Action Group
+  ra_action_group = {
+    scope                   = "/subscriptions/{sub-id}/resourceGroups/rg-automation-lab/providers/Microsoft.Insights/actionGroups/ag-vm-automation-email"
+    role_definition_name    = "Contributor"
+    automation_account_name = "aa-vm-automation"
+  }
+  
+  # Permiso para leer Log Analytics
+  ra_law_reader = {
+    scope                   = "/subscriptions/{sub-id}/resourceGroups/rg-automation-lab/providers/Microsoft.OperationalInsights/workspaces/law-automation"
+    role_definition_name    = "Log Analytics Reader"
+    automation_account_name = "aa-vm-automation"
+  }
+}
+```
+
+### Paso 4: Desplegar con Terraform
+
+```bash
+# Inicializar Terraform
+terraform init
+
+# Validar configuración
+terraform validate
+
+# Ver plan de ejecución
+terraform plan
+
+# Aplicar cambios
+terraform apply
+```
+
+### Paso 5: Configurar Variable en Automation Account
+
+Después del despliegue, configura manualmente la variable `ACTION_GROUP_ID`:
+
+```bash
+# Obtener el ID del Action Group
+ACTION_GROUP_ID=$(az monitor action-group show \
+  --name ag-vm-automation-email \
+  --resource-group rg-automation-lab \
+  --query id -o tsv)
+
+# Crear la variable en el Automation Account
+az automation variable create \
+  --automation-account-name aa-vm-automation \
+  --resource-group rg-automation-lab \
+  --name ACTION_GROUP_ID \
+  --value "$ACTION_GROUP_ID"
+```
+
+O manualmente desde el portal de Azure:
+1. Navega al Automation Account
+2. Ve a **Variables** en el menú lateral
+3. Crea variable `ACTION_GROUP_ID` con el resource ID del Action Group
+
+### Paso 6: Etiquetar VMs
+
+Para que una VM sea gestionada por la automatización, añádele el tag apropiado:
+
+```bash
+# Mediante Azure CLI
+az vm update \
+  --resource-group rg-vms-prod \
+  --name vm-web-app-01 \
+  --set tags.environment=pre
+
+# Mediante Terraform
+resource "azurerm_linux_virtual_machine" "web_app" {
+  name                = "vm-web-app-01"
   resource_group_name = "rg-vms-prod"
   location            = "spaincentral"
   # ... otras configuraciones ...
   
   tags = {
     environment = "pre"
+    managed_by  = "automation"
   }
 }
 ```
 
-## Solución de Problemas
+## Detalles Técnicos de los Runbooks
 
-### Los runbooks no se ejecutan
-1. Verifica que los schedules tengan una fecha de inicio futura
-2. Confirma que el runbook está publicado (estado "Published")
-3. Revisa los logs en el Log Analytics Workspace
+### Script vm-start.ps1
 
-### Las VMs no se inician/detienen
-1. Verifica que la identidad administrada tenga los permisos necesarios
-2. Confirma que las VMs tengan el tag correcto configurado
-3. Revisa los logs de ejecución del runbook en el Automation Account
+El runbook de inicio implementa una lógica robusta:
 
-### No llegan notificaciones por correo
-1. Verifica que la variable `ACTION_GROUP_ID` esté configurada correctamente
-2. Confirma que el email en el Action Group sea correcto
-3. Revisa la bandeja de spam
-4. Verifica que la identidad tenga permisos de "Contributor" sobre el Action Group
+```powershell
+param(
+  [string]$tagkey   = "environment",
+  [string]$tagvalue = "pre",
+  [string]$subscriptionid = "",
+  [int]$waitseconds = 60
+)
 
-### Error de conexión al Automation Account
-1. Verifica que el Private Endpoint esté correctamente configurado
-2. Confirma que la Private DNS Zone esté vinculada a la VNet correcta
-3. Verifica la resolución DNS desde la red privada
+# 1. Autenticación con Managed Identity
+Connect-AzAccount -Identity | Out-Null
 
-## Costos Estimados
+# 2. Cambiar contexto si se especifica suscripción
+if ($subscriptionid -and $subscriptionid.Trim().Length -gt 0) {
+  Set-AzContext -Subscription $subscriptionid | Out-Null
+}
 
-Costos mensuales aproximados (región Spain Central):
+# 3. Obtener VMs con el tag especificado
+$vms = Get-AzVM -Status
+$targets = $vms | Where-Object {
+  $_.Tags.ContainsKey($tagkey) -and $_.Tags[$tagkey] -eq $tagvalue
+}
 
-- Automation Account (Basic): ~€0
-- Ejecuciones de runbook: ~€0.002 por minuto de ejecución
-- Log Analytics Workspace (PerGB2018): desde €2.76/GB ingerido
-- Action Group: Primeras 1000 notificaciones gratis, luego ~€0.60/1000 emails
-- Private Endpoint: ~€6.57/mes
-- Virtual Network: Gratis
+# 4. Cargar Action Group ID
+$actionGroupId = Get-AutomationVariable -Name "ACTION_GROUP_ID"
+if (-not $actionGroupId) { 
+  throw "No existe la variable ACTION_GROUP_ID" 
+}
 
-**Estimación total**: €10-20/mes para uso básico (2 ejecuciones diarias)
+# 5. Si no hay VMs, notificar y salir
+if (-not $targets -or $targets.Count -eq 0) {
+  Send-ActionGroupMail `
+    "AVISO: no hay VMs con tag ($tagkey=$tagvalue)" `
+    "El runbook se ejecutó pero no encontró VMs."
+  return
+}
 
-## Mejoras Futuras
+# 6. Intentar iniciar cada VM
+$startErrors = @()
+foreach ($vm in $targets) {
+  $powerState = ($vm.Statuses | 
+    Where-Object { $_.Code -like "PowerState/*" } | 
+    Select-Object -First 1).DisplayStatus
+  
+  if ($powerState -eq "VM running") {
+    Write-Output "  - VM $($vm.Name) ya está arrancada. Skip."
+    continue
+  }
+  
+  try {
+    Start-AzVM -ResourceGroupName $vm.ResourceGroupName `
+              -Name $vm.Name `
+              -ErrorAction Stop | Out-Null
+    Write-Output "  - VM $($vm.Name) iniciada correctamente"
+  }
+  catch {
+    $startErrors += [PSCustomObject]@{ 
+      name = $vm.Name
+      error = $_.Exception.Message 
+    }
+  }
+}
 
-- [ ] Añadir soporte para múltiples suscripciones
-- [ ] Implementar retry logic para VMs que no cambien de estado
-- [ ] Añadir dashboard en Azure Monitor con métricas clave
-- [ ] Implementar webhook para notificaciones a Teams/Slack
-- [ ] Añadir runbook para start/stop bajo demanda
-- [ ] Implementar start/stop basado en condiciones (uso de CPU, costo)
+# 7. Esperar y re-verificar estados
+Start-Sleep -Seconds $waitseconds
 
-## Contribución
+$after = Get-AzVM -Status | Where-Object {
+  $_.Tags.ContainsKey($tagkey) -and $_.Tags[$tagkey] -eq $tagvalue
+}
 
-Las contribuciones son bienvenidas. Por favor:
+# 8. Clasificar resultados
+$running = @()
+$notRunning = @()
 
-1. Haz fork del repositorio
-2. Crea una rama para tu feature (`git checkout -b feature/nueva-funcionalidad`)
-3. Commitea tus cambios (`git commit -am 'Añadir nueva funcionalidad'`)
-4. Push a la rama (`git push origin feature/nueva-funcionalidad`)
-5. Crea un Pull Request
+foreach ($vm in $after) {
+  $ps = ($vm.Statuses | 
+    Where-Object { $_.Code -like "PowerState/*" }).DisplayStatus
+  
+  if ($ps -eq "VM running") {
+    $running += $vm.Name
+  } else {
+    $notRunning += "$($vm.Name) [$ps]"
+  }
+}
 
-## Licencia
+# 9. Enviar resumen por email
+$subject = "Resultado start VMs por tag ($tagkey=$tagvalue)"
+$desc = @"
+Resumen:
+- Running: $($running -join ", ")
+- No running: $($notRunning -join ", ")
+- Errores: $($startErrors | ForEach-Object { "$($_.name): $($_.error)" } -join " | ")
+"@
 
-Este proyecto está bajo la licencia MIT. Ver el archivo `LICENSE` para más detalles.
+Send-ActionGroupMail $subject $desc
+```
 
-## Autor
+### Características Destacadas
 
-**Luis Adán Muñoz**
-- GitHub: [@luisadanmunoz](https://github.com/luisadanmunoz)
+1. **Manejo de errores robusto**: Captura y reporta errores individuales sin detener el proceso
+2. **Verificación post-inicio**: Espera 60 segundos y verifica que las VMs realmente se iniciaron
+3. **Notificaciones detalladas**: Informa sobre éxitos, fallos y VMs que ya estaban encendidas
+4. **Parámetros configurables**: Permite personalizar tags, suscripción y tiempo de espera
+5. **Idempotencia**: Detecta VMs ya encendidas y las omite
 
-## Agradecimientos
+## Ejemplo de Notificación por Email
 
-- Documentación oficial de Azure Automation
-- Comunidad de Terraform
-- Equipo de Azure
+Cuando el runbook se ejecuta, recibes un email como este:
 
-## Referencias
+```
+De: Azure Action Group <no-reply@microsoft.com>
+Para: ops-team@tudominio.com
+Asunto: Resultado start VMs por tag (environment=pre)
 
-- [Azure Automation Documentation](https://docs.microsoft.com/en-us/azure/automation/)
+Resumen de ejecución del runbook vm-start.ps1:
+
+✅ VMs en estado Running:
+   • vm-web-app-01
+   • vm-api-backend-01
+   • vm-database-01
+
+⚠️ VMs que no se iniciaron:
+   • vm-test-server-01 [VM deallocated]
+
+❌ Errores encontrados:
+   (ninguno)
+
+Timestamp: 2026-01-22 08:01:23 UTC
+Automation Account: aa-vm-automation
+Runbook Job ID: 3f7a9c2b-4d8e-4f1a-9b6c-2e5d8f3a7c1b
+```
+
+## Monitorización con Log Analytics
+
+Todos los logs se centralizan en Log Analytics Workspace. Puedes ejecutar queries KQL para analizar:
+
+### Consultar ejecuciones recientes
+
+```kql
+AzureDiagnostics
+| where ResourceProvider == "MICROSOFT.AUTOMATION"
+| where Category == "JobLogs"
+| where RunbookName_s in ("rb_vm_start", "rb_vm_stop")
+| project TimeGenerated, RunbookName_s, ResultType, JobId_g
+| order by TimeGenerated desc
+| take 50
+```
+
+### Detectar fallos en runbooks
+
+```kql
+AzureDiagnostics
+| where ResourceProvider == "MICROSOFT.AUTOMATION"
+| where Category == "JobStreams"
+| where ResultType == "Failed"
+| project TimeGenerated, RunbookName_s, StreamType_s, ResultDescription
+| order by TimeGenerated desc
+```
+
+### Analizar tiempo de ejecución
+
+```kql
+AzureDiagnostics
+| where ResourceProvider == "MICROSOFT.AUTOMATION"
+| where Category == "JobLogs"
+| where ResultType == "Completed"
+| extend Duration = datetime_diff('second', EndTime_t, CreationTime_t)
+| summarize AvgDuration=avg(Duration), MaxDuration=max(Duration) 
+    by RunbookName_s
+```
+
+## Alertas Automáticas
+
+La solución incluye una alerta programada que se dispara cada vez que finaliza un job:
+
+```hcl
+monitor_scheduled_query_rules_alert_v2 = {
+  alert_automation_job_finished = {
+    name                     = "automation-runbook-finished"
+    severity                 = 4  # Informational
+    evaluation_frequency     = "PT5M"  # Cada 5 minutos
+    window_duration          = "PT5M"
+    time_aggregation_method  = "Count"
+    operator                 = "GreaterThan"
+    threshold                = 0
+    
+    # Query KQL
+    query = <<-QUERY
+      AzureDiagnostics
+      | where ResourceProvider == "MICROSOFT.AUTOMATION"
+      | where Category == "JobLogs"
+      | where TimeGenerated > ago(5m)
+      | where ResultType in ("Completed", "Failed", "Stopped")
+    QUERY
+  }
+}
+```
+
+## Seguridad y Mejores Prácticas
+
+### 1. **Principio de Mínimo Privilegio**
+
+Los role assignments están limitados al ámbito mínimo necesario:
+
+| Rol | Ámbito | Justificación |
+|-----|--------|---------------|
+| Virtual Machine Contributor | RG de VMs | Solo para start/stop, no para crear/eliminar |
+| Monitoring Contributor | RG del Automation | Solo para escribir logs |
+| Contributor | Action Group específico | Solo para enviar notificaciones |
+| Log Analytics Reader | Workspace específico | Solo lectura de logs |
+
+### 2. **Conectividad Privada**
+
+- **Private Endpoint**: El Automation Account no es accesible desde internet
+- **Private DNS Zone**: Resolución DNS privada para `privatelink.azure-automation.net`
+- **Network Security**: Todo el tráfico permanece en la red virtual
+
+### 3. **Identidad Administrada**
+
+- Sin credenciales almacenadas
+- Rotación automática de tokens
+- Auditoría completa en Azure AD
+
+### 4. **Auditoría y Compliance**
+
+- Todos los logs centralizados en Log Analytics
+- Retención configurable (30 días por defecto)
+- Trazabilidad completa de cada operación
+
+## Costos de la Solución
+
+Desglose de costos mensuales estimados (región Spain Central):
+
+| Componente | Costo Mensual |
+|------------|---------------|
+| Automation Account (Basic) | Gratis |
+| Runbook execution (2 jobs/día × 2 min × 30 días) | ~€0.24 |
+| Log Analytics (1 GB/mes ingerido) | ~€2.76 |
+| Action Group (60 emails/mes) | Gratis (primeros 1,000) |
+| Private Endpoint | ~€6.57 |
+| Virtual Network | Gratis |
+| **TOTAL** | **~€9.57/mes** |
+
+### ROI: ¿Cuánto ahorras?
+
+Si tienes **10 VMs B2s** (€30/mes cada una) encendidas 24/7 pero solo las necesitas 8h/día:
+
+- **Costo actual**: 10 VMs × €30 = **€300/mes**
+- **Costo optimizado**: 10 VMs × €30 × (8h/24h) = **€100/mes**
+- **Ahorro mensual**: **€200**
+- **Costo de la solución**: **€9.57**
+- **ROI**: Recuperas la inversión en **2 días** ✅
+
+## Casos de Uso Reales
+
+### 1. Entorno de Desarrollo
+
+```hcl
+# VMs de desarrollo: encendidas 08:00-18:00 (lunes a viernes)
+automation_schedule = {
+  dev_start = {
+    frequency = "Week"
+    interval  = 1
+    week_days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+    start_time = "08:00:00+01:00"
+    tag_key   = "environment"
+    tag_value = "dev"
+  }
+  dev_stop = {
+    frequency = "Week"
+    interval  = 1
+    week_days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+    start_time = "18:00:00+01:00"
+    tag_key   = "environment"
+    tag_value = "dev"
+  }
+}
+```
+
+### 2. Entorno de Testing
+
+```hcl
+# VMs de testing: solo durante horario laboral
+automation_schedule = {
+  test_start = {
+    frequency = "Day"
+    interval  = 1
+    start_time = "07:00:00+01:00"
+    tag_key   = "environment"
+    tag_value = "test"
+  }
+  test_stop = {
+    frequency = "Day"
+    interval  = 1
+    start_time = "20:00:00+01:00"
+    tag_key   = "environment"
+    tag_value = "test"
+  }
+}
+```
+
+### 3. VMs por Proyecto
+
+```hcl
+# VMs de un proyecto específico
+automation_schedule = {
+  project_alpha_start = {
+    frequency = "Day"
+    interval  = 1
+    start_time = "06:00:00+01:00"
+    tag_key   = "project"
+    tag_value = "alpha"
+  }
+}
+```
+
+## Troubleshooting Común
+
+### Problema: El runbook no se ejecuta
+
+**Solución**:
+1. Verifica que el schedule tenga una fecha de inicio futura
+2. Confirma que el runbook esté publicado (estado "Published")
+3. Revisa los jobs en el Automation Account
+
+```bash
+# Listar jobs recientes
+az automation job list \
+  --automation-account-name aa-vm-automation \
+  --resource-group rg-automation-lab
+```
+
+### Problema: Las VMs no cambian de estado
+
+**Solución**:
+1. Verifica los permisos de la identidad administrada
+2. Confirma que las VMs tengan el tag correcto
+3. Revisa los logs del runbook
+
+```bash
+# Ver output del último job
+az automation job get-output \
+  --automation-account-name aa-vm-automation \
+  --resource-group rg-automation-lab \
+  --name <job-id>
+```
+
+### Problema: No llegan emails
+
+**Solución**:
+1. Verifica que la variable `ACTION_GROUP_ID` esté configurada
+2. Confirma que el email sea correcto en el Action Group
+3. Revisa spam/correo no deseado
+4. Verifica permisos sobre el Action Group
+
+```bash
+# Verificar Action Group
+az monitor action-group show \
+  --name ag-vm-automation-email \
+  --resource-group rg-automation-lab
+```
+
+## Mejoras Futuras y Roadmap
+
+Estoy trabajando en las siguientes mejoras para esta solución:
+
+- [ ] **Multi-suscripción**: Gestionar VMs en múltiples suscripciones
+- [ ] **Retry logic**: Reintentar operaciones fallidas automáticamente
+- [ ] **Dashboard personalizado**: Visualizar métricas en Azure Dashboard
+- [ ] **Notificaciones a Teams**: Integración con Microsoft Teams
+- [ ] **Start/stop bajo demanda**: Webhook para control manual
+- [ ] **Machine Learning**: Predicción de uso para optimizar horarios
+- [ ] **Cost Management**: Integración con Azure Cost Management API
+
+## Conclusión
+
+Esta solución de automatización de VMs en Azure demuestra el poder de Infrastructure as Code combinado con las capacidades de automatización nativas de Azure. Con una inversión mínima (menos de €10/mes), puedes ahorrar cientos de euros al mes optimizando el uso de tus recursos.
+
+**Beneficios clave**:
+- ✅ Reducción de costos de hasta 70% en entornos no productivos
+- ✅ Infraestructura 100% como código (reproducible y versionada)
+- ✅ Notificaciones automáticas para mantener visibilidad
+- ✅ Seguridad mejorada con Private Endpoints e Identidad Administrada
+- ✅ Monitorización completa con Log Analytics
+- ✅ Fácil de extender y personalizar
+
+### ¿Quieres implementarlo?
+
+El código completo está disponible en mi repositorio de GitHub:
+
+🔗 **[github.com/luisadanmunoz/start-stop-VM-alarm](https://github.com/luisadanmunoz/start-stop-VM-alarm)**
+
+Si tienes preguntas o sugerencias, no dudes en abrir un issue en el repositorio o contactarme directamente.
+
+---
+
+## Recursos Adicionales
+
+- [Documentación Azure Automation](https://docs.microsoft.com/en-us/azure/automation/)
 - [Terraform AzureRM Provider](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs)
 - [Azure Monitor Action Groups](https://docs.microsoft.com/en-us/azure/azure-monitor/alerts/action-groups)
-- [Log Analytics Workspaces](https://docs.microsoft.com/en-us/azure/azure-monitor/logs/log-analytics-workspace-overview)
+- [PowerShell Az Module](https://docs.microsoft.com/en-us/powershell/azure/)
+
+**Tags**: #Azure #Terraform #InfrastructureAsCode #Automation #DevOps #CostOptimization #CloudComputing #PowerShell
+
+---
+
+*¿Te ha resultado útil este artículo? Compártelo en tus redes sociales y ayuda a otros a optimizar sus costos en Azure.*
