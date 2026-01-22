@@ -194,35 +194,47 @@ sequenceDiagram
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Verificando: Schedule trigger<br/>08:00 AM
+    [*] --> Verificando
     
-    Verificando --> Running: VM ya está<br/>encendida
-    Verificando --> Stopped: VM está<br/>detenida
-    Verificando --> Deallocated: VM está<br/>deallocated
+    state "Schedule Trigger (08:00 AM)" as Verificando
+    state "VM Running" as Running
+    state "VM Stopped" as Stopped  
+    state "VM Deallocated" as Deallocated
+    state "Skip VM" as SkipVM
+    state "Iniciando VM" as Iniciando
+    state "Esperando 60s" as Esperando
+    state "Verificar Estado" as VerificarEstado
+    state "Error al Iniciar" as Error
+    state "Notificar Resultados" as Notificar
+    state "Enviar Email" as EnviarEmail
     
-    Running --> SkipVM: No requiere<br/>acción
+    Verificando --> Running: VM ya encendida
+    Verificando --> Stopped: VM detenida
+    Verificando --> Deallocated: VM deallocated
     
-    Stopped --> Iniciando: Start-AzVM<br/>ejecutado
-    Deallocated --> Iniciando: Start-AzVM<br/>ejecutado
+    Running --> SkipVM: No requiere acción
     
-    Iniciando --> Esperando: Esperar 60s
+    Stopped --> Iniciando: Start-AzVM ejecutado
+    Deallocated --> Iniciando: Start-AzVM ejecutado
     
-    Esperando --> VerificarEstado: Re-verificar<br/>estado
+    Iniciando --> Esperando: Esperar confirmación
     
-    VerificarEstado --> Running: VM encendida<br/>exitosamente
-    VerificarEstado --> Error: VM no pudo<br/>encenderse
+    Esperando --> VerificarEstado: Re-verificar estado
     
-    Running --> Notificar: Agregar a lista<br/>"Running"
-    Error --> Notificar: Agregar a lista<br/>"Errores"
-    SkipVM --> Notificar: Agregar a lista<br/>"Running"
+    VerificarEstado --> Running: VM encendida exitosamente
+    VerificarEstado --> Error: VM no pudo encenderse
     
-    Notificar --> EnviarEmail: Action Group<br/>envía resumen
+    Running --> Notificar: Agregar a lista Running
+    Error --> Notificar: Agregar a lista Errores
+    SkipVM --> Notificar: Agregar a lista Running
     
-    EnviarEmail --> [*]: Proceso<br/>completado
+    Notificar --> EnviarEmail: Action Group envía resumen
+    
+    EnviarEmail --> [*]: Proceso completado
     
     note right of Verificando
         Filtrar VMs con
-        tag: environment=pre
+        tag environment=pre
     end note
     
     note right of Iniciando
@@ -232,9 +244,9 @@ stateDiagram-v2
     
     note right of EnviarEmail
         Email incluye:
-        - Lista de VMs running
-        - Lista de VMs no running
-        - Detalles de errores
+        VMs running
+        VMs no running
+        Detalles de errores
     end note
 ```
 
