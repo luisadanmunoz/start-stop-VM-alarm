@@ -1,12 +1,3 @@
-# start-stop-VM-alarm
-start-stop-VM-alarm
-
-# Pasos
-1.-cumplimentar /backend/start-stop-VM-alarm.tfvars
-2.-cumplimentar /env/start-stop-VM-alarm.tfvars
-3.- terraform init -backend-config .\backend\start-stop-VM-alarm.tfvars
-4.- terraform apply -var-file="./env/start-stop-VM-alarm.tfvars"
-
 # Start/Stop VM Alarm
 
 Solución de automatización en Azure para gestionar el encendido y apagado programado de máquinas virtuales basándose en etiquetas (tags), con notificaciones automáticas por correo electrónico sobre el estado de las operaciones.
@@ -35,44 +26,216 @@ La solución despliega los siguientes componentes de Azure:
 - **Private DNS Zone** para resolución DNS privada del Automation Account
 - **Role Assignments** necesarios para permisos de la identidad administrada
 
-### Diagrama de flujo
+### Diagrama de Arquitectura
 
+```mermaid
+graph TB
+    subgraph "Recursos de Red"
+        VNET[Virtual Network<br/>10.248.4.0/24]
+        SUBNET[Subnet<br/>subnet-lab-01]
+        PDNS[Private DNS Zone<br/>privatelink.azure-automation.net]
+        PE[Private Endpoint<br/>Automation Account]
+    end
+
+    subgraph "Automation"
+        AA[Automation Account<br/>aa-prod<br/>System Assigned Identity]
+        RB_START[Runbook: vm-start.ps1<br/>PowerShell]
+        RB_STOP[Runbook: vm-stop.ps1<br/>PowerShell]
+        SCH_START[Schedule: Start<br/>Daily 08:00 AM]
+        SCH_STOP[Schedule: Stop<br/>Daily 05:00 PM]
+        VAR[Variable: ACTION_GROUP_ID]
+    end
+
+    subgraph "Monitorización"
+        LAW[Log Analytics Workspace<br/>law-lab-01]
+        AG[Action Group<br/>ag-vm-tag-email-lab-01]
+        ALERT[Scheduled Query Alert<br/>automation-runbook-finished]
+    end
+
+    subgraph "Máquinas Virtuales Target"
+        VM1[VM 1<br/>tag: environment=pre]
+        VM2[VM 2<br/>tag: environment=pre]
+        VM3[VM 3<br/>tag: environment=pre]
+    end
+
+    subgraph "Permisos RBAC"
+        RBAC1[Virtual Machine Contributor<br/>sobre RG de VMs]
+        RBAC2[Monitoring Contributor<br/>sobre RG Automation]
+        RBAC3[Contributor<br/>sobre Action Group]
+        RBAC4[Log Analytics Reader<br/>sobre LAW]
+    end
+
+    VNET --> SUBNET
+    SUBNET --> PE
+    PE --> AA
+    PDNS -.DNS Resolution.-> PE
+    
+    SCH_START -->|Trigger| RB_START
+    SCH_STOP -->|Trigger| RB_STOP
+    
+    AA --> RB_START
+    AA --> RB_STOP
+    AA --> VAR
+    
+    RB_START -->|Get-AzVM -Status| VM1
+    RB_START -->|Get-AzVM -Status| VM2
+    RB_START -->|Get-AzVM -Status| VM3
+    
+    RB_START -->|Start-AzVM| VM1
+    RB_START -->|Start-AzVM| VM2
+    RB_START -->|Start-AzVM| VM3
+    
+    RB_STOP -->|Stop-AzVM| VM1
+    RB_STOP -->|Stop-AzVM| VM2
+    RB_STOP -->|Stop-AzVM| VM3
+    
+    VAR -->|Action Group ID| RB_START
+    VAR -->|Action Group ID| RB_STOP
+    
+    RB_START -->|Send Notification| AG
+    RB_STOP -->|Send Notification| AG
+    
+    AG -->|Email| EMAIL[📧 ops@domain.com]
+    
+    AA -->|Logs| LAW
+    RB_START -->|Execution Logs| LAW
+    RB_STOP -->|Execution Logs| LAW
+    
+    LAW --> ALERT
+    ALERT -->|Trigger on Job Finish| AG
+    
+    AA -.Identity.-> RBAC1
+    AA -.Identity.-> RBAC2
+    AA -.Identity.-> RBAC3
+    AA -.Identity.-> RBAC4
+    
+    RBAC1 -.Allows.-> VM1
+    RBAC1 -.Allows.-> VM2
+    RBAC1 -.Allows.-> VM3
+    RBAC2 -.Allows.-> LAW
+    RBAC3 -.Allows.-> AG
+    RBAC4 -.Allows.-> LAW
+
+    style AA fill:#0078D4,stroke:#005A9E,color:#fff
+    style RB_START fill:#50E6FF,stroke:#0078D4,color:#000
+    style RB_STOP fill:#50E6FF,stroke:#0078D4,color:#000
+    style LAW fill:#FFA500,stroke:#FF8C00,color:#000
+    style AG fill:#FFD700,stroke:#FFA500,color:#000
+    style VM1 fill:#90EE90,stroke:#32CD32,color:#000
+    style VM2 fill:#90EE90,stroke:#32CD32,color:#000
+    style VM3 fill:#90EE90,stroke:#32CD32,color:#000
+    style EMAIL fill:#FFB6C1,stroke:#FF69B4,color:#000
 ```
-┌─────────────────────┐
-│ Automation Schedule │
-│   (diario 08:00)   │
-└──────────┬──────────┘
-           │
-           ▼
-┌──────────────────────┐
-│  Runbook PowerShell  │
-│   (vm-start.ps1)    │
-└──────────┬───────────┘
-           │
-           ▼
-┌──────────────────────────┐
-│ Busca VMs con tag       │
-│ environment=pre         │
-└──────────┬───────────────┘
-           │
-           ▼
-┌──────────────────────────┐
-│ Inicia VMs encontradas  │
-│ (Start-AzVM)            │
-└──────────┬───────────────┘
-           │
-           ▼
-┌──────────────────────────┐
-│ Espera 60 segundos      │
-│ y verifica estado       │
-└──────────┬───────────────┘
-           │
-           ▼
-┌──────────────────────────┐
-│ Action Group           │
-│ Envía email con        │
-│ resumen (running/stop) │
-└────────────────────────┘
+
+### Diagrama de Flujo de Ejecución
+
+```mermaid
+sequenceDiagram
+    participant SCH as Automation Schedule<br/>(08:00 AM)
+    participant RB as Runbook<br/>(vm-start.ps1)
+    participant AAI as Automation Account<br/>Identity
+    participant AZURE as Azure Resource Manager
+    participant VM as Virtual Machines<br/>(tag: environment=pre)
+    participant AG as Action Group
+    participant EMAIL as Email Recipients
+
+    Note over SCH,RB: Trigger diario programado
+    SCH->>RB: Ejecutar runbook
+    
+    activate RB
+    RB->>AAI: Connect-AzAccount -Identity
+    AAI-->>RB: Token de autenticación
+    
+    RB->>AZURE: Get-AzVM -Status
+    AZURE-->>RB: Lista de todas las VMs
+    
+    Note over RB: Filtrar VMs con tag<br/>environment=pre
+    
+    RB->>RB: Procesar lista de VMs objetivo
+    
+    loop Para cada VM con el tag
+        RB->>VM: Verificar PowerState
+        VM-->>RB: Estado actual (running/stopped/deallocated)
+        
+        alt VM no está running
+            RB->>VM: Start-AzVM
+            VM-->>RB: Operación iniciada
+        else VM ya está running
+            RB->>RB: Skip (ya está encendida)
+        end
+    end
+    
+    Note over RB: Esperar 60 segundos
+    RB->>RB: Start-Sleep -Seconds 60
+    
+    RB->>AZURE: Get-AzVM -Status (verificación)
+    AZURE-->>RB: Estados actualizados
+    
+    RB->>RB: Construir resumen:<br/>- VMs running<br/>- VMs no running<br/>- Errores
+    
+    RB->>AAI: Get-AutomationVariable<br/>"ACTION_GROUP_ID"
+    AAI-->>RB: Action Group ID
+    
+    RB->>AAI: Get-AzAccessToken
+    AAI-->>RB: Access Token
+    
+    RB->>AG: POST /createNotifications<br/>Resumen de ejecución
+    AG->>EMAIL: Enviar notificación por correo
+    
+    EMAIL-->>AG: Email entregado
+    AG-->>RB: Notificación enviada
+    
+    deactivate RB
+    
+    Note over EMAIL: 📧 Correo recibido con:<br/>- VMs encendidas<br/>- VMs que no se encendieron<br/>- Errores (si los hay)
+```
+
+### Diagrama de Estados de VM
+
+```mermaid
+stateDiagram-v2
+    [*] --> Verificando: Schedule trigger<br/>08:00 AM
+    
+    Verificando --> Running: VM ya está<br/>encendida
+    Verificando --> Stopped: VM está<br/>detenida
+    Verificando --> Deallocated: VM está<br/>deallocated
+    
+    Running --> SkipVM: No requiere<br/>acción
+    
+    Stopped --> Iniciando: Start-AzVM<br/>ejecutado
+    Deallocated --> Iniciando: Start-AzVM<br/>ejecutado
+    
+    Iniciando --> Esperando: Esperar 60s
+    
+    Esperando --> VerificarEstado: Re-verificar<br/>estado
+    
+    VerificarEstado --> Running: VM encendida<br/>exitosamente
+    VerificarEstado --> Error: VM no pudo<br/>encenderse
+    
+    Running --> Notificar: Agregar a lista<br/>"Running"
+    Error --> Notificar: Agregar a lista<br/>"Errores"
+    SkipVM --> Notificar: Agregar a lista<br/>"Running"
+    
+    Notificar --> EnviarEmail: Action Group<br/>envía resumen
+    
+    EnviarEmail --> [*]: Proceso<br/>completado
+    
+    note right of Verificando
+        Filtrar VMs con
+        tag: environment=pre
+    end note
+    
+    note right of Iniciando
+        Operación asíncrona
+        Azure inicia el proceso
+    end note
+    
+    note right of EnviarEmail
+        Email incluye:
+        - Lista de VMs running
+        - Lista de VMs no running
+        - Detalles de errores
+    end note
 ```
 
 ## Requisitos Previos
